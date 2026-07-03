@@ -7,6 +7,7 @@ import { healthRouter } from "./routes/health";
 import { authRouter } from "./routes/auth";
 import { adminRouter } from "./routes/admin";
 import { keysRouter } from "./routes/keys";
+import { usersRouter } from "./routes/users";
 import { setupSocket } from "./socket";
 
 const app = express();
@@ -29,6 +30,7 @@ app.use("/api/health", healthRouter);
 app.use("/api/auth", authRateLimit, authRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/keys", keysRouter);
+app.use("/api/users", usersRouter);
 
 // Make io accessible from route handlers
 app.set("io", io);

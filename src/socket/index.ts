@@ -2,6 +2,7 @@ import { Server, Socket } from "socket.io";
 import { AuthService, TokenPayload } from "../services/auth.service";
 import { UserService } from "../services/user.service";
 import { MessageService } from "../services/message.service";
+import { PresenceService } from "../services/presence.service";
 
 // Extend Socket to include authenticated user
 interface AuthenticatedSocket extends Socket {
@@ -50,6 +51,13 @@ export function setupSocket(io: Server): void {
     // Track online status
     onlineUsers.set(user.userId, socket.id);
     socket.join(`user:${user.userId}`);
+
+    // Presence: mark online and broadcast
+    await PresenceService.setOnline(user.userId);
+    socket.broadcast.emit("presence:online", {
+      userId: user.userId,
+      timestamp: Date.now(),
+    });
 
     // Flush offline messages on connect
     await flushOfflineMessages(io, socket, user.userId);
@@ -194,11 +202,29 @@ export function setupSocket(io: Server): void {
       }
     });
 
-    socket.on("disconnect", () => {
+    socket.on("disconnect", async () => {
       console.log(
         `[Socket.io] User disconnected: ${user.uniqueId} (${socket.id})`,
       );
       onlineUsers.delete(user.userId);
+
+      // Presence: mark offline and broadcast
+      await PresenceService.setOffline(user.userId);
+      socket.broadcast.emit("presence:offline", {
+        userId: user.userId,
+        timestamp: Date.now(),
+      });
+    });
+
+    /**
+     * presence:subscribe — Client wants to know when specific contacts come online.
+     * Payload: { userIds: string[] }
+     */
+    socket.on("presence:subscribe", async (data) => {
+      const { userIds } = data;
+      if (!Array.isArray(userIds)) return;
+      const statuses = await PresenceService.getOnlineStatuses(userIds);
+      socket.emit("presence:status", { statuses });
     });
   });
 }
