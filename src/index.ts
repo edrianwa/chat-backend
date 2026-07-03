@@ -6,6 +6,7 @@ import { applySecurity, authRateLimit } from "./middleware/security.middleware";
 import { healthRouter } from "./routes/health";
 import { authRouter } from "./routes/auth";
 import { adminRouter } from "./routes/admin";
+import { keysRouter } from "./routes/keys";
 import { setupSocket } from "./socket";
 
 const app = express();
@@ -27,6 +28,10 @@ app.use(express.json());
 app.use("/api/health", healthRouter);
 app.use("/api/auth", authRateLimit, authRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/keys", keysRouter);
+
+// Make io accessible from route handlers
+app.set("io", io);
 
 // Socket.io setup
 setupSocket(io);
