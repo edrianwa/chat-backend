@@ -9,6 +9,7 @@ import { adminRouter } from "./routes/admin";
 import { keysRouter } from "./routes/keys";
 import { usersRouter } from "./routes/users";
 import { mediaRouter } from "./routes/media";
+import { callsRouter } from "./routes/calls";
 import { setupSocket } from "./socket";
 
 const app = express();
@@ -33,6 +34,7 @@ app.use("/api/admin", adminRouter);
 app.use("/api/keys", keysRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/media", mediaRouter);
+app.use("/api/calls", callsRouter);
 
 // Make io accessible from route handlers
 app.set("io", io);

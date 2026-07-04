@@ -3,6 +3,7 @@ import { AuthService, TokenPayload } from "../services/auth.service";
 import { UserService } from "../services/user.service";
 import { MessageService } from "../services/message.service";
 import { PresenceService } from "../services/presence.service";
+import { CallService } from "../services/call.service";
 
 // Extend Socket to include authenticated user
 interface AuthenticatedSocket extends Socket {
@@ -225,6 +226,152 @@ export function setupSocket(io: Server): void {
       if (!Array.isArray(userIds)) return;
       const statuses = await PresenceService.getOnlineStatuses(userIds);
       socket.emit("presence:status", { statuses });
+    });
+
+    // --- Call Signaling Handlers ---
+
+    /**
+     * call:initiate — Caller initiates a call.
+     * Payload: { calleeId, offer (SDP) }
+     */
+    socket.on("call:initiate", async (data, callback) => {
+      try {
+        const { calleeId, offer } = data;
+        if (!calleeId || !offer) {
+          if (typeof callback === "function")
+            callback({ error: "Missing calleeId or offer" });
+          return;
+        }
+
+        // Check if callee is busy
+        const busy = await CallService.isInCall(calleeId);
+        if (busy) {
+          socket.emit("call:busy", { calleeId });
+          if (typeof callback === "function") callback({ error: "busy" });
+          return;
+        }
+
+        // Check if callee is online
+        const calleeOnline = onlineUsers.has(calleeId);
+        if (!calleeOnline) {
+          // TODO: Send FCM push notification for offline callee
+          if (typeof callback === "function") callback({ error: "offline" });
+          return;
+        }
+
+        // Create call log
+        const callId = await CallService.createCallLog(user.userId, calleeId);
+
+        // Mark both as in-call
+        await CallService.setInCall(user.userId, callId);
+        await CallService.setInCall(calleeId, callId);
+
+        // Relay offer to callee
+        io.to(`user:${calleeId}`).emit("call:offer", {
+          callId,
+          callerId: user.userId,
+          callerUniqueId: user.uniqueId,
+          offer,
+        });
+
+        // Set timeout — auto-cancel after 30s
+        setTimeout(async () => {
+          const stillInCall = await CallService.isInCall(calleeId);
+          if (stillInCall) {
+            const log = await CallService.getCallHistory(user.userId, 1);
+            if (log.length > 0 && log[0].id === callId && !log[0].answered_at) {
+              await CallService.markEnded(callId, "missed");
+              await CallService.clearCallState(user.userId);
+              await CallService.clearCallState(calleeId);
+              io.to(`user:${user.userId}`).emit("call:timeout", { callId });
+              io.to(`user:${calleeId}`).emit("call:timeout", { callId });
+            }
+          }
+        }, CallService.CALL_TIMEOUT_MS);
+
+        if (typeof callback === "function") callback({ success: true, callId });
+      } catch (err) {
+        console.error("[Socket.io] call:initiate error:", err);
+        if (typeof callback === "function")
+          callback({ error: "Failed to initiate call" });
+      }
+    });
+
+    /**
+     * call:answer — Callee answers the call.
+     * Payload: { callId, callerId, answer (SDP) }
+     */
+    socket.on("call:answer", async (data) => {
+      try {
+        const { callId, callerId, answer } = data;
+        if (!callId || !callerId || !answer) return;
+
+        await CallService.markAnswered(callId);
+
+        // Relay answer to caller
+        io.to(`user:${callerId}`).emit("call:answer", {
+          callId,
+          calleeId: user.userId,
+          answer,
+        });
+      } catch (err) {
+        console.error("[Socket.io] call:answer error:", err);
+      }
+    });
+
+    /**
+     * call:ice-candidate — Relay ICE candidates bidirectionally.
+     * Payload: { callId, targetUserId, candidate }
+     */
+    socket.on("call:ice-candidate", (data) => {
+      const { targetUserId, candidate } = data;
+      if (!targetUserId || !candidate) return;
+
+      io.to(`user:${targetUserId}`).emit("call:ice-candidate", {
+        fromUserId: user.userId,
+        candidate,
+      });
+    });
+
+    /**
+     * call:reject — Callee rejects the call.
+     * Payload: { callId, callerId }
+     */
+    socket.on("call:reject", async (data) => {
+      try {
+        const { callId, callerId } = data;
+        if (!callId || !callerId) return;
+
+        await CallService.markRejected(callId);
+        await CallService.clearCallState(user.userId);
+        await CallService.clearCallState(callerId);
+
+        io.to(`user:${callerId}`).emit("call:rejected", {
+          callId,
+          calleeId: user.userId,
+        });
+      } catch (err) {
+        console.error("[Socket.io] call:reject error:", err);
+      }
+    });
+
+    /**
+     * call:end — Either party ends the call.
+     * Payload: { callId, otherUserId }
+     */
+    socket.on("call:end", async (data) => {
+      try {
+        const { callId, otherUserId } = data;
+        if (!callId || !otherUserId) return;
+
+        await CallService.markEnded(callId);
+        await CallService.clearCallState(user.userId);
+        await CallService.clearCallState(otherUserId);
+
+        io.to(`user:${otherUserId}`).emit("call:ended", { callId });
+      } catch (err) {
+        console.error("[Socket.io] call:end error:", err);
+      }
     });
   });
 }
