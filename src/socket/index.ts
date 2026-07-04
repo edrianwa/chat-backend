@@ -232,16 +232,18 @@ export function setupSocket(io: Server): void {
 
     /**
      * call:initiate — Caller initiates a call.
-     * Payload: { calleeId, offer (SDP) }
+     * Payload: { calleeId, offer (SDP), callType: 'voice' | 'video' }
      */
     socket.on("call:initiate", async (data, callback) => {
       try {
-        const { calleeId, offer } = data;
+        const { calleeId, offer, callType } = data;
         if (!calleeId || !offer) {
           if (typeof callback === "function")
             callback({ error: "Missing calleeId or offer" });
           return;
         }
+
+        const type = callType === "video" ? "video" : "voice";
 
         // Check if callee is busy
         const busy = await CallService.isInCall(calleeId);
@@ -260,7 +262,11 @@ export function setupSocket(io: Server): void {
         }
 
         // Create call log
-        const callId = await CallService.createCallLog(user.userId, calleeId);
+        const callId = await CallService.createCallLog(
+          user.userId,
+          calleeId,
+          type,
+        );
 
         // Mark both as in-call
         await CallService.setInCall(user.userId, callId);
@@ -271,6 +277,7 @@ export function setupSocket(io: Server): void {
           callId,
           callerId: user.userId,
           callerUniqueId: user.uniqueId,
+          callType: type,
           offer,
         });
 
@@ -372,6 +379,68 @@ export function setupSocket(io: Server): void {
       } catch (err) {
         console.error("[Socket.io] call:end error:", err);
       }
+    });
+
+    /**
+     * call:toggle-video — Notify remote peer video enabled/disabled.
+     * Payload: { callId, targetUserId, videoEnabled: boolean }
+     */
+    socket.on("call:toggle-video", (data) => {
+      const { targetUserId, videoEnabled } = data;
+      if (!targetUserId) return;
+      io.to(`user:${targetUserId}`).emit("call:video-toggled", {
+        userId: user.userId,
+        videoEnabled,
+      });
+    });
+
+    /**
+     * call:upgrade — Request to upgrade voice call to video.
+     * Payload: { callId, targetUserId, offer (new SDP with video) }
+     */
+    socket.on("call:upgrade", (data) => {
+      const { callId, targetUserId, offer } = data;
+      if (!targetUserId || !offer) return;
+      io.to(`user:${targetUserId}`).emit("call:upgrade-request", {
+        callId,
+        fromUserId: user.userId,
+        offer,
+      });
+    });
+
+    /**
+     * call:upgrade-accept — Accept video upgrade.
+     * Payload: { callId, targetUserId, answer (SDP) }
+     */
+    socket.on("call:upgrade-accept", (data) => {
+      const { callId, targetUserId, answer } = data;
+      if (!targetUserId || !answer) return;
+      io.to(`user:${targetUserId}`).emit("call:upgrade-accepted", {
+        callId,
+        fromUserId: user.userId,
+        answer,
+      });
+    });
+
+    /**
+     * call:upgrade-reject — Reject video upgrade.
+     * Payload: { callId, targetUserId }
+     */
+    socket.on("call:upgrade-reject", (data) => {
+      const { targetUserId } = data;
+      if (!targetUserId) return;
+      io.to(`user:${targetUserId}`).emit("call:upgrade-rejected", {
+        fromUserId: user.userId,
+      });
+    });
+
+    /**
+     * call:quality-report — Client reports connection quality (for logging).
+     * Payload: { callId, quality: 'good' | 'fair' | 'poor', stats: {} }
+     */
+    socket.on("call:quality-report", (data) => {
+      // Log for analytics (optional)
+      // console.log(`[Call Quality] ${user.uniqueId}: ${data.quality}`);
     });
   });
 }
