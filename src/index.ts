@@ -13,6 +13,7 @@ import { callsRouter } from "./routes/calls";
 import { adminExtRouter } from "./routes/admin-extended";
 import { settingsRouter } from "./routes/settings";
 import { notificationsRouter } from "./routes/notifications";
+import { deviceRouter } from "./routes/device";
 import { setupSocket } from "./socket";
 
 const app = express();
@@ -41,6 +42,7 @@ app.use("/api/calls", callsRouter);
 app.use("/api/admin", adminExtRouter);
 app.use("/api/users", settingsRouter);
 app.use("/api/notifications", notificationsRouter);
+app.use("/api/users", deviceRouter);
 
 // Make io accessible from route handlers
 app.set("io", io);
