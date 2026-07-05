@@ -4,6 +4,7 @@ import { UserService } from "../services/user.service";
 import { MessageService } from "../services/message.service";
 import { PresenceService } from "../services/presence.service";
 import { CallService } from "../services/call.service";
+import { NotificationService } from "../services/notification.service";
 
 // Extend Socket to include authenticated user
 interface AuthenticatedSocket extends Socket {
@@ -124,6 +125,14 @@ export function setupSocket(io: Server): void {
             ciphertext,
             sequenceNumber,
           });
+
+          // Send FCM push notification
+          await NotificationService.sendMessageNotification(
+            recipientId,
+            user.userId,
+            messageId,
+            false, // recipient is offline
+          );
         }
 
         // ACK to sender
@@ -256,7 +265,12 @@ export function setupSocket(io: Server): void {
         // Check if callee is online
         const calleeOnline = onlineUsers.has(calleeId);
         if (!calleeOnline) {
-          // TODO: Send FCM push notification for offline callee
+          // Send FCM push for incoming call
+          await NotificationService.sendCallNotification(
+            calleeId,
+            user.userId,
+            type,
+          );
           if (typeof callback === "function") callback({ error: "offline" });
           return;
         }
